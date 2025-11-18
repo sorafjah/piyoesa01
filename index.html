@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>ヒヨコにエサ 調整版</title>
+    <title>ヒヨコにエサ 最終調整版</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
     <style>
         body, html {
@@ -161,15 +161,21 @@
         const PLAYER_MAX_HEALTH = 100;
         const PUNCH_COST = 2;
         const STRONG_PUNCH_COST = 6; 
-        const EAT_HEAL = 10;
+        const EAT_HEAL = 15; // 回復量を少しアップ
         const GRAVITY = 0.6; // プレイヤーの重力
-        const FOOD_GRAVITY = 0.15; // 食べ物の重力（軽くした）
-        const FOOD_SPAWN_RATE = 1500; // 生成頻度も少しゆっくりに
+        
+        // 調整ポイント: 食べ物の落下速度
+        const FOOD_GRAVITY = 0.05; // かなりふわふわに
+        const FOOD_SPAWN_RATE = 1800; // 生成間隔も少しゆっくり
 
         // --- 2. ユーティリティ関数 ---
 
         function rand(min, max) {
             return Math.floor(Math.random() * (max - min + 1)) + min;
+        }
+        
+        function randFloat(min, max) {
+             return Math.random() * (max - min) + min;
         }
 
         function getDistance(x1, y1, x2, y2) {
@@ -185,7 +191,7 @@
 
         class Player {
             constructor() {
-                this.size = 50;
+                this.size = 40; // 小さく (50 -> 40)
                 this.radius = this.size / 2;
                 this.x = W / 2;
                 this.y = groundY - this.radius;
@@ -200,7 +206,6 @@
                 ctx.font = `${this.size}px Arial`;
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                // 常に同じ絵文字（パンチしても手のアイコンにならない）
                 ctx.fillText(this.emoji, this.x, this.y);
             }
 
@@ -214,7 +219,7 @@
                     if (this.y > groundY - this.radius) {
                         this.y = groundY - this.radius;
                         this.vy = 0;
-                        this.isJumping = false; // 着地したら再度ジャンプ可能
+                        this.isJumping = false;
                     }
                 } else {
                     this.y = groundY - this.radius;
@@ -245,44 +250,61 @@
 
             jumpPunch(isStrong) {
                 if (isGameOver) return;
-                // 空中では追加ジャンプ（トリプルパンチ等）できないように制限
                 if (this.isJumping) return;
 
                 const cost = isStrong ? STRONG_PUNCH_COST : PUNCH_COST;
                 if (this.health <= cost) return;
 
                 this.changeHealth(-cost);
-                
                 this.isJumping = true;
-                // ジャンプ力
                 this.vy = isStrong ? -18 : -12;
 
                 createParticle(this.x, this.y - 30, isStrong ? '💥' : '💨');
 
-                // パンチ判定（強さによって範囲と吹き飛ばし力が変わる）
-                const punchRange = isStrong ? 90 : 70; // 範囲を少し広げた
-                const punchPowerY = isStrong ? -18 : -10; // 食べ物を飛ばす力
+                // 調整ポイント: 当たり判定の強化
+                // プレイヤーの中心よりも少し上を基準に判定を行う
+                const hitCenterY = this.y - 40; 
+                const punchRange = isStrong ? 120 : 100; // 判定範囲をかなり拡大 (元70/90)
 
                 foods.forEach(food => {
-                    const dist = getDistance(this.x, this.y - 20, food.x, food.y);
-                    if (dist < punchRange + food.radius) {
+                    // 距離判定
+                    const dist = getDistance(this.x, hitCenterY, food.x, food.y);
+                    
+                    // 判定内、かつ まだパンチされていない、かつ プレイヤーより上にある食べ物
+                    // (横や下の食べ物を誤爆しないように少し制限しつつ、上方向は甘く)
+                    if (dist < punchRange + food.radius && food.y < this.y + 20) {
                         // プレイヤーとの位置関係で横に飛ばす
-                        let pushX = (food.x - this.x) * 0.15;
+                        let pushX = (food.x - this.x) * 0.2;
+                        // 真上に近い場合はランダムに散らす
+                        if (Math.abs(pushX) < 1) pushX = rand(-2, 2);
+                        
+                        // 打ち上げる力
+                        const punchPowerY = isStrong ? -18 : -10; 
                         food.punch(pushX, punchPowerY);
+                        
+                        // ヒットエフェクト
+                        createParticle(food.x, food.y, '💢');
                     }
                 });
             }
 
             eat() {
                 if (isGameOver) return;
+                
+                // 調整ポイント: 食べる判定の強化
+                // 見た目より広めに判定をとる (半径 + 30pxの猶予)
+                const eatBuffer = 40;
+
                 for (let i = foods.length - 1; i >= 0; i--) {
                     const f = foods[i];
-                    // ジャンプ中でも食べられるように判定
-                    if (circleCollision(this, f)) {
+                    const dist = getDistance(this.x, this.y, f.x, f.y);
+                    
+                    if (dist < this.radius + f.radius + eatBuffer) {
                         this.changeHealth(EAT_HEAL);
-                        createParticle(this.x, this.y, '😋');
+                        createParticle(this.x, this.y - 20, '😋');
+                        createParticle(this.x, this.y - 40, '➕💖'); // 回復エフェクト
                         foods.splice(i, 1);
-                        return;
+                        return; // 1回のアクションで1個食べる
                     }
                 }
             }
@@ -290,13 +312,14 @@
 
         class Food {
             constructor() {
-                this.radius = 20;
+                this.radius = 15; // 小さく (20 -> 15)
                 this.x = rand(this.radius + 10, W - this.radius - 10);
                 this.y = -30;
                 this.vx = 0;
-                // 初期落下速度をゆっくりに
-                this.vy = rand(1, 2); 
-                this.emoji = ['🍎', '🍇', '🍞', '🥦'][rand(0, 3)];
+                // 調整ポイント: 初期落下速度をゆっくりに
+                this.vy = randFloat(0.5, 1.5); 
+                // メニュー追加: ハンバーガーとケーキ
+                this.emoji = ['🍎', '🍇', '🍞', '🥦', '🍔', '🍰'][rand(0, 5)];
                 this.rotation = 0;
                 this.rotSpeed = 0;
                 this.isPunched = false;
@@ -345,7 +368,7 @@
             punch(vx, vy) {
                 this.isPunched = true;
                 this.vx = vx + rand(-1, 1);
-                this.vy = vy; // 打ち上げ速度
+                this.vy = vy;
                 this.rotSpeed = rand(-0.1, 0.1);
             }
         }
@@ -356,7 +379,7 @@
                 this.baseY = y;
                 this.x = x;
                 this.y = y;
-                this.size = 45;
+                this.size = 35; // 小さく (45 -> 35)
                 this.radius = this.size / 2;
                 this.emoji = '🐦';
                 this.eatTimer = 0;
@@ -399,7 +422,7 @@
                 this.y = y;
                 this.emoji = emoji;
                 this.life = 30;
-                this.vy = -1;
+                this.vy = -1.5;
             }
             update() {
                 this.y += this.vy;
@@ -407,7 +430,7 @@
             }
             draw() {
                 ctx.globalAlpha = this.life / 30;
-                ctx.font = '30px Arial';
+                ctx.font = '25px Arial';
                 ctx.fillText(this.emoji, this.x, this.y);
                 ctx.globalAlpha = 1.0;
             }
